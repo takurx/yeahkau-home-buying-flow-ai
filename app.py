@@ -8,7 +8,7 @@ from openai import OpenAI
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.yaml"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 st.set_page_config(page_title="住宅購入ナビAI", page_icon="🏠", layout="wide")
