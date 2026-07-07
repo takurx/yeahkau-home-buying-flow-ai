@@ -3,7 +3,7 @@
 - YeahKau 家購入補佐AI — 知らないまま、家を買わせない。
 
 住宅購入の進捗状況や不安点を入力すると、AIが「今やること」「確認すべきこと」「専門家に聞くべきこと」を整理するMVPです。
-住宅購入の進捗状況（契約・審査・金消・保険・住民票・決済日）と質問を入力すると、AIが以下を整理して返すStreamlitアプリです。
+住宅購入の進捗状況（契約・審査・金消・保険・住民票・決済日）と質問を入力すると、AIが会話形式で整理して返すStreamlitアプリです。
 
 - 次にやること（優先度順）
 - リスク（重要なものから）
@@ -20,20 +20,20 @@
 pip install -r requirements.txt
 ```
 
-## 環境変数の設定方法
+## 設定方法
 
-OpenAI APIキーを `OPENAI_API_KEY` に設定してください。
+`settings.yaml` に Gemini API キーを設定してください。
 
-### Windows (cmd.exe)
+`settings_template.yaml` をコピーして `settings.yaml` を用意しても構いません。
 
-```cmd
-set OPENAI_API_KEY=あなたのAPIキー
-```
+### `settings.yaml` の例
 
-### Windows (PowerShell)
-
-```powershell
-$env:OPENAI_API_KEY="あなたのAPIキー"
+```yaml
+api_ai: gemini
+api_key: あなたのGemini APIキー
+api_key_name: Gemini API Key
+project_name: projects/123456789012
+project_number: 123456789012
 ```
 
 ## 実行方法
