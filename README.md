@@ -22,7 +22,7 @@ pip install -r requirements.txt
 
 ## 設定方法
 
-`settings.yaml` に Gemini API キーを設定してください。
+`settings.yaml` でバックエンドとモデルを設定してください。
 
 `settings_template.yaml` をコピーして `settings.yaml` を用意しても構いません。
 
@@ -35,7 +35,20 @@ api_key_name: Gemini API Key
 project_id: your-gcp-project-id
 location: global
 model: gemini-2.5-flash
+
+llm_backend: vertex
+model_options: gemini-2.5-flash,anthropic/claude-opus-4.7,x-ai/grok-4.20
+
+openai_compat_base_url: https://openrouter.ai/api/v1
+openai_compat_api_key: あなたのOpenAI互換APIキー
+openai_compat_model: anthropic/claude-opus-4.7
 ```
+
+### 切り替え方法
+
+- Vertex Gemini を使う場合: `llm_backend: vertex`
+- Claude/Grok へ切り替える場合: `llm_backend: openai_compatible`
+- モデル名は左カラムの「モデル」プルダウンで切り替え
 
 ## 実行方法
 

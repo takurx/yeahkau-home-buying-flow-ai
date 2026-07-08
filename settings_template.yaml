@@ -4,3 +4,14 @@ api_key_name: Gemini API Key
 project_id: your-gcp-project-id
 location: global
 model: gemini-2.5-flash
+
+# バックエンド切り替え: vertex / openai_compatible
+llm_backend: vertex
+
+# モデル候補（UIのプルダウン表示）
+model_options: gemini-2.5-flash,anthropic/claude-opus-4.7,x-ai/grok-4.20
+
+# OpenAI互換エンドポイント設定（llm_backend=openai_compatible のとき使用）
+openai_compat_base_url: https://openrouter.ai/api/v1
+openai_compat_api_key: YOUR_OPENAI_COMPAT_API_KEY
+openai_compat_model: anthropic/claude-opus-4.7
