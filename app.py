@@ -1,14 +1,16 @@
 from pathlib import Path
+import json
 import os
+from urllib import error, request
+from urllib.parse import urlencode
 
 import streamlit as st
-from openai import OpenAI
 
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.yaml"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
+DEFAULT_VERTEX_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 st.set_page_config(page_title="住宅購入ナビAI", page_icon="🏠", layout="wide")
@@ -36,13 +38,26 @@ def load_settings(path: Path = SETTINGS_PATH) -> dict[str, str]:
     return settings
 
 
-def get_api_key() -> str:
-    settings = load_settings()
+def resolve_project_id(settings: dict[str, str]) -> str:
+    project_name = settings.get("project_name", "")
+    if project_name.startswith("projects/"):
+        return project_name.split("/", 1)[1]
+
     return (
-        settings.get("api_key", "")
-        or os.getenv("GEMINI_API_KEY", "")
-        or os.getenv("OPENAI_API_KEY", "")
+        settings.get("project_id", "")
+        or settings.get("project_number", "")
+        or os.getenv("VERTEX_PROJECT_ID", "")
     )
+
+
+def get_vertex_config() -> dict[str, str]:
+    settings = load_settings()
+    return {
+        "api_key": settings.get("api_key", "") or os.getenv("GEMINI_API_KEY", ""),
+        "project_id": resolve_project_id(settings),
+        "location": settings.get("location", "") or DEFAULT_VERTEX_LOCATION,
+        "model": settings.get("model", "") or DEFAULT_VERTEX_MODEL,
+    }
 
 
 def build_system_prompt(
@@ -75,19 +90,77 @@ def build_system_prompt(
 必要なら、前回までの会話を踏まえて補足してください。"""
 
 
-def get_client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL)
+def _build_vertex_contents(messages: list[dict[str, str]]) -> list[dict]:
+    contents: list[dict] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content", "").strip()
+        if not content or role not in {"user", "assistant"}:
+            continue
+
+        vertex_role = "model" if role == "assistant" else "user"
+        contents.append({"role": vertex_role, "parts": [{"text": content}]})
+
+    return contents
 
 
-def chat_with_gemini(api_key: str, messages: list[dict[str, str]]) -> str:
-    client = get_client(api_key)
-    response = client.chat.completions.create(
-        model=GEMINI_MODEL,
-        messages=messages,
-        temperature=0.3,
+def _extract_vertex_text(response_json: dict) -> str:
+    candidates = response_json.get("candidates", [])
+    if not candidates:
+        return ""
+
+    parts = candidates[0].get("content", {}).get("parts", [])
+    texts = [part.get("text", "") for part in parts if isinstance(part, dict)]
+    return "\n".join(text for text in texts if text).strip()
+
+
+def _extract_error_message(body: str, fallback: str) -> str:
+    try:
+        parsed = json.loads(body)
+        return parsed.get("error", {}).get("message", fallback)
+    except json.JSONDecodeError:
+        return body or fallback
+
+
+def chat_with_vertex(
+    api_key: str,
+    project_id: str,
+    location: str,
+    model: str,
+    system_prompt: str,
+    messages: list[dict[str, str]],
+) -> str:
+    host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+    url = (
+        f"https://{host}/v1/projects/{project_id}/"
+        f"locations/{location}/publishers/google/models/{model}:generateContent"
+        f"?{urlencode({'key': api_key})}"
     )
-    content = response.choices[0].message.content or ""
-    return content.strip()
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": _build_vertex_contents(messages),
+        "generationConfig": {"temperature": 0.3},
+    }
+
+    req = request.Request(
+        url=url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=60) as res:
+            body = res.read().decode("utf-8")
+            parsed = json.loads(body)
+            content = _extract_vertex_text(parsed)
+            return content or "回答を取得できませんでした。"
+    except error.HTTPError as http_err:
+        body = http_err.read().decode("utf-8", errors="ignore") if http_err.fp else ""
+        message = _extract_error_message(body, f"HTTP {http_err.code}")
+        raise RuntimeError(f"Error code: {http_err.code} - {message}") from http_err
+    except error.URLError as url_err:
+        raise RuntimeError(f"ネットワークエラー: {url_err.reason}") from url_err
 
 
 if "messages" not in st.session_state:
@@ -129,27 +202,37 @@ with right_col:
 
 
 if question:
-    api_key = get_api_key()
+    vertex_config = get_vertex_config()
+    api_key = vertex_config["api_key"]
+    project_id = vertex_config["project_id"]
+    location = vertex_config["location"]
+    model = vertex_config["model"]
+
     if not api_key:
         st.error("settings.yaml に api_key が設定されていません。settings_template.yaml を参考に設定してください。")
+    elif not project_id:
+        st.error(
+            "settings.yaml に project_id または project_number または project_name を設定してください。"
+            "\n例: project_id: your-gcp-project-id"
+        )
     else:
         try:
             st.session_state.messages.append({"role": "user", "content": question.strip()})
-            prompt_messages = [
-                {
-                    "role": "system",
-                    "content": build_system_prompt(
-                        contract=contract,
-                        loan=loan,
-                        kinko=kinko,
-                        insurance=insurance,
-                        address=address,
-                        date=str(settlement_date),
-                    ),
-                },
-                *st.session_state.messages,
-            ]
-            answer = chat_with_gemini(api_key, prompt_messages)
+            answer = chat_with_vertex(
+                api_key=api_key,
+                project_id=project_id,
+                location=location,
+                model=model,
+                system_prompt=build_system_prompt(
+                    contract=contract,
+                    loan=loan,
+                    kinko=kinko,
+                    insurance=insurance,
+                    address=address,
+                    date=str(settlement_date),
+                ),
+                messages=st.session_state.messages,
+            )
             st.session_state.messages.append({"role": "assistant", "content": answer})
             st.rerun()
         except Exception as exc:

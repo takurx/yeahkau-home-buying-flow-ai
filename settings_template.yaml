@@ -1,5 +1,6 @@
 api_ai: gemini
 api_key: YOUR_GEMINI_API_KEY
 api_key_name: Gemini API Key
-project_name: projects/123456789012
-project_number: 123456789012
+project_id: your-gcp-project-id
+location: global
+model: gemini-2.5-flash

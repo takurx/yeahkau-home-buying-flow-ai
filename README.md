@@ -30,10 +30,11 @@ pip install -r requirements.txt
 
 ```yaml
 api_ai: gemini
-api_key: あなたのGemini APIキー
+api_key: あなたのVertex AI APIキー
 api_key_name: Gemini API Key
-project_name: projects/123456789012
-project_number: 123456789012
+project_id: your-gcp-project-id
+location: global
+model: gemini-2.5-flash
 ```
 
 ## 実行方法
