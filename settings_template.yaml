@@ -3,4 +3,7 @@ api_key: YOUR_GEMINI_API_KEY
 api_key_name: Gemini API Key
 project_id: your-gcp-project-id
 location: global
-model: gemini-2.5-flash
+model: google/gemini-2.5-flash
+model_options: google/gemini-2.5-flash,anthropic/claude-opus-4-7,x-ai/grok-4.20
+anthropic_location: us-east5
+x_ai_location: us-east5

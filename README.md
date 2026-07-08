@@ -34,8 +34,23 @@ api_key: あなたのVertex AI APIキー
 api_key_name: Gemini API Key
 project_id: your-gcp-project-id
 location: global
-model: gemini-2.5-flash
+model: google/gemini-2.5-flash
+model_options: google/gemini-2.5-flash,anthropic/claude-opus-4-7,x-ai/grok-4.20
+anthropic_location: us-east5
+x_ai_location: us-east5
 ```
+
+## Vertex で Claude/Grok を使う場合の Google 側設定
+
+1. 対象プロジェクトで Vertex AI API を有効化する
+2. Vertex AI Model Garden で Anthropic と xAI のモデル利用を有効化する
+3. 利用モデルに対応したリージョンを settings.yaml の location に設定する
+4. APIキー制限を設定している場合は、Vertex AI API への利用を許可する
+
+補足: settings.yaml の location が global の場合、アプリは Claude/Grok 選択時に
+anthropic_location / x_ai_location へ自動切り替えます。
+
+補足: Claude/Grok はリージョンや利用許可が不足していると 403/404 になりやすいです。その場合は model と location の組み合わせを見直してください。
 
 ## 実行方法
 

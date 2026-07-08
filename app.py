@@ -11,6 +11,7 @@ APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.yaml"
 DEFAULT_VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
 DEFAULT_VERTEX_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL_OPTIONS = "google/gemini-2.5-flash,anthropic/claude-opus-4-7,x-ai/grok-4.20"
 
 
 st.set_page_config(page_title="住宅購入ナビAI", page_icon="🏠", layout="wide")
@@ -57,7 +58,37 @@ def get_vertex_config() -> dict[str, str]:
         "project_id": resolve_project_id(settings),
         "location": settings.get("location", "") or DEFAULT_VERTEX_LOCATION,
         "model": settings.get("model", "") or DEFAULT_VERTEX_MODEL,
+        "model_options": settings.get("model_options", "") or DEFAULT_MODEL_OPTIONS,
+        "anthropic_location": settings.get("anthropic_location", "") or "us-east5",
+        "x_ai_location": settings.get("x_ai_location", "") or "us-east5",
     }
+
+
+def parse_model_options(model_options: str, default_model: str) -> list[str]:
+    options = [item.strip() for item in model_options.split(",") if item.strip()]
+    if not options:
+        options = [f"google/{default_model}"]
+    return options
+
+
+def parse_vertex_model_spec(model_spec: str) -> tuple[str, str]:
+    spec = model_spec.strip()
+    if "/" in spec:
+        publisher, model = spec.split("/", 1)
+        return publisher.strip(), model.strip()
+    return "google", spec
+
+
+def resolve_location_for_model(model_spec: str, base_location: str, config: dict[str, str]) -> str:
+    publisher, _ = parse_vertex_model_spec(model_spec)
+    if base_location != "global":
+        return base_location
+
+    if publisher == "anthropic":
+        return config.get("anthropic_location", "us-east5")
+    if publisher == "x-ai":
+        return config.get("x_ai_location", "us-east5")
+    return base_location
 
 
 def build_system_prompt(
@@ -126,14 +157,15 @@ def chat_with_vertex(
     api_key: str,
     project_id: str,
     location: str,
-    model: str,
+    model_spec: str,
     system_prompt: str,
     messages: list[dict[str, str]],
 ) -> str:
+    publisher, model = parse_vertex_model_spec(model_spec)
     host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
     url = (
         f"https://{host}/v1/projects/{project_id}/"
-        f"locations/{location}/publishers/google/models/{model}:generateContent"
+        f"locations/{location}/publishers/{publisher}/models/{model}:generateContent"
         f"?{urlencode({'key': api_key})}"
     )
     payload = {
@@ -158,6 +190,12 @@ def chat_with_vertex(
     except error.HTTPError as http_err:
         body = http_err.read().decode("utf-8", errors="ignore") if http_err.fp else ""
         message = _extract_error_message(body, f"HTTP {http_err.code}")
+        if http_err.code in {403, 404} and publisher != "google":
+            message = (
+                f"{message}\n\n"
+                "補足: Claude/Grok を Vertex で使うには、Model Garden で対象モデル利用の有効化と"
+                " 対応リージョン設定が必要です。"
+            )
         raise RuntimeError(f"Error code: {http_err.code} - {message}") from http_err
     except error.URLError as url_err:
         raise RuntimeError(f"ネットワークエラー: {url_err.reason}") from url_err
@@ -167,10 +205,26 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
+vertex_config = get_vertex_config()
+model_options = parse_model_options(
+    model_options=vertex_config["model_options"],
+    default_model=vertex_config["model"],
+)
+if "selected_model" not in st.session_state or st.session_state.selected_model not in model_options:
+    configured_model = vertex_config["model"]
+    configured_spec = configured_model if "/" in configured_model else f"google/{configured_model}"
+    st.session_state.selected_model = configured_spec if configured_spec in model_options else model_options[0]
+
+
 left_col, center_col, right_col = st.columns([1, 1.2, 1.2])
 
 with left_col:
     st.subheader("状態入力")
+    st.session_state.selected_model = st.selectbox(
+        "Vertex AI モデル",
+        options=model_options,
+        index=model_options.index(st.session_state.selected_model),
+    )
     contract = st.checkbox("売買契約済", value=False)
     loan = st.checkbox("本審査済", value=False)
     kinko = st.checkbox("金消済", value=False)
@@ -202,11 +256,10 @@ with right_col:
 
 
 if question:
-    vertex_config = get_vertex_config()
     api_key = vertex_config["api_key"]
     project_id = vertex_config["project_id"]
-    location = vertex_config["location"]
-    model = vertex_config["model"]
+    model = st.session_state.selected_model
+    location = resolve_location_for_model(model, vertex_config["location"], vertex_config)
 
     if not api_key:
         st.error("settings.yaml に api_key が設定されていません。settings_template.yaml を参考に設定してください。")
@@ -222,7 +275,7 @@ if question:
                 api_key=api_key,
                 project_id=project_id,
                 location=location,
-                model=model,
+                model_spec=model,
                 system_prompt=build_system_prompt(
                     contract=contract,
                     loan=loan,
