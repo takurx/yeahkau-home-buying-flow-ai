@@ -53,10 +53,10 @@ def resolve_project_id(settings: dict[str, str]) -> str:
 def get_vertex_config() -> dict[str, str]:
     settings = load_settings()
     return {
-        "api_key": settings.get("api_key", "") or os.getenv("GEMINI_API_KEY", ""),
-        "project_id": resolve_project_id(settings),
-        "location": settings.get("location", "") or DEFAULT_VERTEX_LOCATION,
-        "model": settings.get("model", "") or DEFAULT_VERTEX_MODEL,
+        "api_key": settings.get("api_key", "") or os.getenv("GEMINI_API_KEY", "") or st.secrets.get("api_key", ""),
+        "project_id": resolve_project_id(settings) or st.secrets.get("project_id", ""),
+        "location": settings.get("location", "") or DEFAULT_VERTEX_LOCATION or st.secrets.get("location", ""),
+        "model": settings.get("model", "") or DEFAULT_VERTEX_MODEL or st.secrets.get("model", ""),
     }
 
 
