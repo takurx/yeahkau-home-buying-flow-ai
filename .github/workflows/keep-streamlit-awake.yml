@@ -7,20 +7,16 @@ on:
 
 jobs:
   ping:
-    # Fork先では実行しない
     if: github.repository == 'takurx/yeahkau-home-buying-flow-ai'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Ping Streamlit demo
+      - name: Ping Streamlit health endpoint
         run: |
           curl \
             --fail \
-            --location \
-            --silent \
             --show-error \
-            --max-time 60 \
+            --max-time 90 \
             --retry 3 \
-            "https://yeahkau-home-buying-flow-ai-6panzkdpbncrdebedjvdep.streamlit.app/"
-
-
+            --retry-delay 10 \
+            "https://yeahkau-home-buying-flow-ai-6panzkdpbncrdebedjvdep.streamlit.app/_stcore/health"
