@@ -77,11 +77,16 @@ jobs:
               # check it from the same browser session so cookies and redirect
               # state are preserved.
               current = urlsplit(driver.current_url)
-              health_url = (
-                  f"{current.scheme}://{current.netloc}/_stcore/health"
-              )
+              origin = f"{current.scheme}://{current.netloc}"
+              # Community Cloud routes the live Streamlit backend beneath
+              # /~/+/. The root /_stcore/health path can return the static
+              # frontend HTML shell instead of the backend health response.
+              health_urls = [
+                  origin + "/~/+/_stcore/health",
+                  origin + "/_stcore/health",
+              ]
               print(f"Browser URL: {driver.current_url}")
-              print(f"Health URL: {health_url}")
+              print(f"Health URLs: {health_urls}")
 
               driver.set_script_timeout(40)
               health_script = """
@@ -106,22 +111,30 @@ jobs:
               last_result = {}
 
               while time.time() < deadline:
-                  last_result = driver.execute_async_script(
-                      health_script, health_url
-                  )
+                  for health_url in health_urls:
+                      last_result = driver.execute_async_script(
+                          health_script, health_url
+                      )
+                      last_result["checked_url"] = health_url
 
-                  if (
-                      last_result.get("status") == 200
-                      and last_result.get("body", "").strip() == "ok"
-                  ):
-                      print("Streamlit backend is awake and healthy.")
-                      # Leave the browser connected briefly so the visit is
-                      # recorded as a real Streamlit session.
-                      time.sleep(15)
-                      break
+                      if (
+                          last_result.get("status") == 200
+                          and last_result.get("body", "").strip() == "ok"
+                      ):
+                          print(
+                              "Streamlit backend is awake and healthy at "
+                              + health_url
+                          )
+                          # Leave the browser connected briefly so the visit is
+                          # recorded as a real Streamlit session.
+                          time.sleep(15)
+                          break
+                  else:
+                      print(f"Backend is not ready yet: {last_result!r}")
+                      time.sleep(10)
+                      continue
 
-                  print(f"Backend is not ready yet: {last_result!r}")
-                  time.sleep(10)
+                  break
               else:
                   print("Visible page text:")
                   print(driver.find_element(By.TAG_NAME, "body").text[:1000])
