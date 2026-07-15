@@ -5,18 +5,106 @@ on:
     - cron: "17 */6 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  ping:
+  wake:
     if: github.repository == 'takurx/yeahkau-home-buying-flow-ai'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Ping Streamlit health endpoint
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install browser automation
+        run: python -m pip install --disable-pip-version-check selenium
+
+      - name: Visit app and wake it when needed
+        env:
+          STREAMLIT_URL: "https://yeahkau-home-buying-flow-ai-6panzkdpbncrdebedjvdep.streamlit.app/"
         run: |
-          curl \
-            --fail \
-            --show-error \
-            --max-time 90 \
-            --retry 3 \
-            --retry-delay 10 \
-            "https://yeahkau-home-buying-flow-ai-6panzkdpbncrdebedjvdep.streamlit.app/_stcore/health"
+          python <<'PY'
+          import os
+          import time
+          import urllib.request
+
+          from selenium import webdriver
+          from selenium.common.exceptions import TimeoutException
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support import expected_conditions as EC
+          from selenium.webdriver.support.ui import WebDriverWait
+
+          app_url = os.environ["STREAMLIT_URL"]
+          health_url = app_url.rstrip("/") + "/_stcore/health"
+
+          options = webdriver.ChromeOptions()
+          options.add_argument("--headless=new")
+          options.add_argument("--no-sandbox")
+          options.add_argument("--disable-dev-shm-usage")
+          options.add_argument("--window-size=1440,1200")
+
+          driver = webdriver.Chrome(options=options)
+          try:
+              driver.set_page_load_timeout(120)
+              try:
+                  driver.get(app_url)
+              except TimeoutException:
+                  print("Initial page load timed out; continuing with wake check.")
+
+              wake_button_xpath = (
+                  "//*[self::button or @role='button']"
+                  "[contains(translate(normalize-space(.), "
+                  "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "
+                  "'get this app back up')]"
+              )
+
+              try:
+                  wake_button = WebDriverWait(driver, 20).until(
+                      EC.element_to_be_clickable((By.XPATH, wake_button_xpath))
+                  )
+                  print("Sleeping page detected. Clicking the wake-up button.")
+                  driver.execute_script("arguments[0].click();", wake_button)
+              except TimeoutException:
+                  print("No wake-up button found. The app may already be awake.")
+
+              deadline = time.time() + 240
+              last_response = ""
+
+              while time.time() < deadline:
+                  try:
+                      request = urllib.request.Request(
+                          health_url,
+                          headers={"User-Agent": "Mozilla/5.0"},
+                      )
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          last_response = response.read().decode(
+                              "utf-8", errors="replace"
+                          ).strip()
+
+                      if last_response == "ok":
+                          print("Streamlit backend is awake and healthy.")
+                          # Leave the browser connected briefly so the visit is
+                          # recorded as a real Streamlit session.
+                          time.sleep(15)
+                          break
+
+                      print(
+                          "Backend is not ready yet. Response starts with: "
+                          + repr(last_response[:120])
+                      )
+                  except Exception as exc:
+                      print(f"Health check failed while waking: {exc}")
+
+                  time.sleep(10)
+              else:
+                  raise RuntimeError(
+                      "The Streamlit backend did not become healthy within "
+                      f"240 seconds. Last response: {last_response[:300]!r}"
+                  )
+          finally:
+              driver.quit()
+          PY
