@@ -33,7 +33,7 @@ jobs:
           python <<'PY'
           import os
           import time
-          import urllib.request
+          from urllib.parse import urlsplit
 
           from selenium import webdriver
           from selenium.common.exceptions import TimeoutException
@@ -42,8 +42,6 @@ jobs:
           from selenium.webdriver.support.ui import WebDriverWait
 
           app_url = os.environ["STREAMLIT_URL"]
-          health_url = app_url.rstrip("/") + "/_stcore/health"
-
           options = webdriver.ChromeOptions()
           options.add_argument("--headless=new")
           options.add_argument("--no-sandbox")
@@ -74,39 +72,62 @@ jobs:
               except TimeoutException:
                   print("No wake-up button found. The app may already be awake.")
 
+              # Community Cloud may redirect the public URL to a canonical
+              # host. Build the health URL from the browser's final URL and
+              # check it from the same browser session so cookies and redirect
+              # state are preserved.
+              current = urlsplit(driver.current_url)
+              health_url = (
+                  f"{current.scheme}://{current.netloc}/_stcore/health"
+              )
+              print(f"Browser URL: {driver.current_url}")
+              print(f"Health URL: {health_url}")
+
+              driver.set_script_timeout(40)
+              health_script = """
+                  const url = arguments[0];
+                  const done = arguments[arguments.length - 1];
+                  fetch(url, {
+                    cache: "no-store",
+                    credentials: "include",
+                    redirect: "follow"
+                  })
+                    .then(async (response) => {
+                      done({
+                        status: response.status,
+                        url: response.url,
+                        body: (await response.text()).slice(0, 500)
+                      });
+                    })
+                    .catch((error) => done({error: String(error)}));
+              """
+
               deadline = time.time() + 240
-              last_response = ""
+              last_result = {}
 
               while time.time() < deadline:
-                  try:
-                      request = urllib.request.Request(
-                          health_url,
-                          headers={"User-Agent": "Mozilla/5.0"},
-                      )
-                      with urllib.request.urlopen(request, timeout=30) as response:
-                          last_response = response.read().decode(
-                              "utf-8", errors="replace"
-                          ).strip()
+                  last_result = driver.execute_async_script(
+                      health_script, health_url
+                  )
 
-                      if last_response == "ok":
-                          print("Streamlit backend is awake and healthy.")
-                          # Leave the browser connected briefly so the visit is
-                          # recorded as a real Streamlit session.
-                          time.sleep(15)
-                          break
+                  if (
+                      last_result.get("status") == 200
+                      and last_result.get("body", "").strip() == "ok"
+                  ):
+                      print("Streamlit backend is awake and healthy.")
+                      # Leave the browser connected briefly so the visit is
+                      # recorded as a real Streamlit session.
+                      time.sleep(15)
+                      break
 
-                      print(
-                          "Backend is not ready yet. Response starts with: "
-                          + repr(last_response[:120])
-                      )
-                  except Exception as exc:
-                      print(f"Health check failed while waking: {exc}")
-
+                  print(f"Backend is not ready yet: {last_result!r}")
                   time.sleep(10)
               else:
+                  print("Visible page text:")
+                  print(driver.find_element(By.TAG_NAME, "body").text[:1000])
                   raise RuntimeError(
                       "The Streamlit backend did not become healthy within "
-                      f"240 seconds. Last response: {last_response[:300]!r}"
+                      f"240 seconds. Last result: {last_result!r}"
                   )
           finally:
               driver.quit()
