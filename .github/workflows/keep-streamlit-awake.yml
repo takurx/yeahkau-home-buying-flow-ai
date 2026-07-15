@@ -1,6 +1,9 @@
 name: Keep demo awake until 2026-08-19
 
 on:
+  push:
+    paths:
+      - ".github/workflows/keep-streamlit-awake.yml"
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
